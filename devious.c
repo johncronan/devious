@@ -33,7 +33,6 @@
 
 #include "devious.h"
 
-GUPnPDIDLLiteParser *didl_parser;
 
 void add_view(GUPnPDIDLLiteParser *didl_parser, xmlNode *object_node,
               gpointer user_data)
@@ -41,6 +40,7 @@ void add_view(GUPnPDIDLLiteParser *didl_parser, xmlNode *object_node,
     struct browse_data *data = (struct browse_data *)user_data;
     
     char *title = gupnp_didl_lite_object_get_title(object_node);
+    char *id = gupnp_didl_lite_object_get_id(object_node);
 
     GError *error = NULL;
     GdkPixbuf *icon = gtk_icon_theme_load_icon(gtk_icon_theme_get_default(),
@@ -50,7 +50,9 @@ void add_view(GUPnPDIDLLiteParser *didl_parser, xmlNode *object_node,
     GtkTreeIter iter;
     gtk_list_store_append(data->list, &iter);
     gtk_list_store_set(data->list, &iter,
-                       COL_ICON, icon, COL_LABEL, title, -1);
+                       COL_ICON, icon, COL_LABEL, title,
+                       COL_ID, id,
+                       COL_CONTENT, data->content_dir, -1);
 }
 
 struct browse_data *browse_data_new(GUPnPServiceProxy *content_dir,
@@ -98,7 +100,7 @@ void browse_cb(GUPnPServiceProxy *content_dir,
         guint32 remaining;
         GError *error = NULL;
 
-        if (!gupnp_didl_lite_parser_parse_didl(didl_parser, didl_xml,
+        if (!gupnp_didl_lite_parser_parse_didl(data->didl_parser, didl_xml,
                                                add_view, data, &error)) {
             g_warning("%s\n", error->message);
             g_error_free(error);
@@ -111,7 +113,8 @@ void browse_cb(GUPnPServiceProxy *content_dir,
         remaining = total_matches - data->starting_index;
         /* Keep browsing till we get each and every object */
         if (remaining != 0) browse(content_dir, data->id, data->starting_index,
-                                   MIN(remaining, MAX_BROWSE), data->list);
+                                   MIN(remaining, MAX_BROWSE),
+                                   data->list, data->didl_parser);
     } else if (error) {
         GUPnPServiceInfo *info;
 
@@ -128,7 +131,7 @@ void browse_cb(GUPnPServiceProxy *content_dir,
 
 void browse(GUPnPServiceProxy *content_dir, const char *container_id,
             guint32 starting_index, guint32 requested_count,
-            GtkListStore *list)
+            GtkListStore *list, GUPnPDIDLLiteParser *didl_parser)
 {
     struct browse_data *data;
     data = browse_data_new(content_dir, container_id, starting_index, list);
@@ -220,30 +223,7 @@ GtkWidget *new_selector(GtkListStore *list)
     return selector;
 }
 
-GtkWidget *artists_window(struct proxy *server, char *artist)
-{
-    GtkWidget *window = hildon_stackable_window_new();
-    if (!artist)
-        gtk_window_set_title(GTK_WINDOW(window), "Artists");
-
-    GError *error = NULL;
-    GdkPixbuf *icon = gtk_icon_theme_load_icon(gtk_icon_theme_get_default(),
-                                               "general_folder",
-                                               HILDON_ICON_PIXEL_SIZE_FINGER,
-                                               0, &error);
-    GtkListStore *list = gtk_list_store_new(NUM_COLS-1,
-                                            GDK_TYPE_PIXBUF, G_TYPE_STRING);
-    GtkWidget *selector = new_selector(list);
-
-//    g_signal_connect(G_OBJECT(selector), "changed",
-//                     G_CALLBACK(view_select), server);
-
-    gtk_container_add(GTK_CONTAINER(window), selector);
-
-    return window;
-}
-
-void view_select(HildonTouchSelector *selector, gint column, gpointer data)
+void content_select(HildonTouchSelector *selector, gint column, gpointer data)
 {
     GtkTreePath *path;
     path = hildon_touch_selector_get_last_activated_row(selector, column);
@@ -254,31 +234,37 @@ void view_select(HildonTouchSelector *selector, gint column, gpointer data)
     gtk_tree_model_get_iter(model, &iter, path);
 
     GUPnPServiceProxy *content;
-    gtk_tree_model_get(model, &iter, COL_ID, &content, -1);
+    char *id;
+    gtk_tree_model_get(model, &iter, COL_CONTENT, &content, COL_ID, &id, -1);
 
     struct proxy *server = (struct proxy *)data;
-    GtkWidget *window = NULL;
-    if (!strcmp(label, "Artists")) {
-        window = artists_window(server, NULL);
-    }
+    GtkListStore *view_list;
+    GtkWidget *window = content_window(server, &view_list);
 
-    if (!window) return;
+    browse(content, id, 0, MAX_BROWSE, view_list, server->didl_parser);
+
+    gupnp_service_proxy_add_notify(content, "ContainerUpdateIDs",
+                                   G_TYPE_STRING, on_container_update_ids,
+                                   NULL);
+    gupnp_service_proxy_set_subscribed(content, TRUE);
+
     HildonWindowStack *stack = hildon_window_stack_get_default();
     hildon_window_stack_push_1(stack, HILDON_STACKABLE_WINDOW(window));
 }
 
-GtkWidget *server_window(struct proxy *server, GtkListStore **view_list)
+GtkWidget *content_window(struct proxy *server, GtkListStore **view_list)
 {
     GtkWidget *window = hildon_stackable_window_new();
     gtk_window_set_title(GTK_WINDOW(window), server->name);
 
-    GtkListStore *list = gtk_list_store_new(NUM_COLS-1,
-                                            GDK_TYPE_PIXBUF, G_TYPE_STRING);
+    GtkListStore *list = gtk_list_store_new(NUM_COLS+1, GDK_TYPE_PIXBUF,
+                                            G_TYPE_STRING, G_TYPE_STRING,
+                                            G_TYPE_POINTER);
 
     GtkWidget *selector = new_selector(list);
 
     g_signal_connect(G_OBJECT(selector), "changed",
-                     G_CALLBACK(view_select), server);
+                     G_CALLBACK(content_select), server);
 
     gtk_container_add(GTK_CONTAINER(window), selector);
 
@@ -307,9 +293,11 @@ void server_select(HildonTouchSelector *selector, gint column, gpointer data)
                                       CONTENT_DIR));
 
     GtkListStore *view_list;
-    GtkWidget *window = server_window(server, &view_list);
+    GtkWidget *window = content_window(server, &view_list);
 
-    browse(content_dir, "0", 0, MAX_BROWSE, view_list);
+    server->didl_parser = gupnp_didl_lite_parser_new();
+    browse(content_dir, "0", 0, MAX_BROWSE, view_list, server->didl_parser);
+
     gupnp_service_proxy_add_notify(content_dir, "ContainerUpdateIDs",
                                    G_TYPE_STRING, on_container_update_ids,
                                    NULL);

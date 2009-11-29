@@ -37,6 +37,7 @@ struct proxy {
     GtkTreeRowReference *row;
     GUPnPDeviceProxy *proxy;
     char *name;
+    GUPnPDIDLLiteParser *didl_parser;
 };
 
 struct proxy_set {
@@ -52,6 +53,7 @@ struct browse_data {
     gchar *id;
     guint32 starting_index;
     GtkListStore *list;
+    GUPnPDIDLLiteParser *didl_parser;
 };
 
 enum {
@@ -61,19 +63,19 @@ enum {
     NUM_COLS
 };
 
+#define COL_CONTENT NUM_COLS
+
 void browse(GUPnPServiceProxy *content_dir, const char *container_id,
             guint32 starting_index, guint32 requested_count,
-            GtkListStore *list);
+            GtkListStore *list, GUPnPDIDLLiteParser *didl_parser);
 
 void set_panarea_padding(GtkWidget *child, gpointer data);
 
 GtkWidget *new_selector(GtkListStore *list);
 
-GtkWidget *artists_window(struct proxy *server, char *artist);
+void content_select(HildonTouchSelector *selector, gint column, gpointer data);
 
-void view_select(HildonTouchSelector *selector, gint column, gpointer data);
-
-GtkWidget *server_window(struct proxy *server, GtkListStore **list);
+GtkWidget *content_window(struct proxy *server, GtkListStore **list);
 
 void server_select(HildonTouchSelector *selector, gint column, gpointer data);
 
