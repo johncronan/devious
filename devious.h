@@ -38,6 +38,7 @@ gcc -pthread -L/usr/X11R6/lib -lm
 #define ICON_XALIGN 0.6
 #define MEDIA_RENDERER "urn:schemas-upnp-org:device:MediaRenderer:*"
 #define MEDIA_SERVER "urn:schemas-upnp-org:device:MediaServer:*"
+#define MAX_BROWSE 64
 
 struct proxy {
     GtkTreeRowReference *row;
@@ -53,6 +54,12 @@ struct proxy_set {
     GdkPixbuf *icon;
 };
 
+struct browse_data {
+    GUPnPServiceProxy *content_dir;
+    gchar *id;
+    guint32 starting_index;
+};
+
 enum {
     COL_ICON = 0,
     COL_LABEL,
@@ -60,13 +67,16 @@ enum {
     NUM_COLS
 };
 
+void browse(GUPnPServiceProxy *content_dir, const char *container_id,
+            guint32 starting_index, guint32 requested_count);
+
 void set_panarea_padding(GtkWidget *child, gpointer data);
 
 GtkWidget *new_selector(GtkListStore *list);
 
 GtkWidget *artists_window(struct proxy *server, char *artist);
 
-void view_select(HildonTouchSelector *selector, gint column, gpointer data)
+void view_select(HildonTouchSelector *selector, gint column, gpointer data);
 
 GtkWidget *server_window(struct proxy *server);
 

@@ -33,6 +33,105 @@
 
 #include "devious.h"
 
+GUPnPDIDLLiteParser *didl_parser;
+
+void on_didl_object_available(GUPnPDIDLLiteParser *didl_parser,
+                              xmlNode *object_node, gpointer user_data)
+{
+
+}
+
+struct browse_data *browse_data_new(GUPnPServiceProxy *content_dir,
+                                    const char *id, guint32 starting_index)
+{
+    struct browse_data *data;
+
+    data = g_slice_new(struct browse_data);
+    data->content_dir = g_object_ref(content_dir);
+    data->id = g_strdup(id);
+    data->starting_index = starting_index;
+
+    return data;
+}
+
+void browse_data_free(struct browse_data *data)
+{
+    g_free(data->id);
+    g_object_unref(data->content_dir);
+    g_slice_free(struct browse_data, data);
+}
+
+void browse_cb(GUPnPServiceProxy *content_dir,
+               GUPnPServiceProxyAction *action, gpointer user_data)
+{
+    struct browse_data *data;
+    char *didl_xml;
+    guint32 number_returned;
+    guint32 total_matches;
+    GError *error;
+
+    data = (struct browse_data *)user_data;
+    didl_xml = NULL;
+    error = NULL;
+
+    gupnp_service_proxy_end_action(content_dir, action, &error,
+                                   "Result", G_TYPE_STRING, &didl_xml,
+                                   "NumberReturned", G_TYPE_UINT,
+                                       &number_returned,
+                                   "TotalMatches", G_TYPE_UINT, &total_matches,
+                                   NULL);
+    if (didl_xml) {
+        guint32 remaining;
+        GError *error = NULL;
+
+        if (!gupnp_didl_lite_parser_parse_didl(didl_parser, didl_xml,
+                                               on_didl_object_available,
+                                               data, &error)) {
+            g_warning("%s\n", error->message);
+            g_error_free(error);
+        }
+        g_free(didl_xml);
+
+        data->starting_index += number_returned;
+
+        /* See if we have more objects to get */
+        remaining = total_matches - data->starting_index;
+        /* Keep browsing till we get each and every object */
+        if (remaining != 0) browse(content_dir, data->id, data->starting_index,
+                                   MIN(remaining, MAX_BROWSE));
+    } else if (error) {
+        GUPnPServiceInfo *info;
+
+        info = GUPNP_SERVICE_INFO(content_dir);
+        g_warning("Failed to browse '%s': %s\n",
+                  gupnp_service_info_get_location (info),
+                  error->message);
+
+        g_error_free(error);
+    }
+
+    browse_data_free(data);
+}
+
+void browse(GUPnPServiceProxy *content_dir, const char *container_id,
+            guint32 starting_index, guint32 requested_count)
+{
+    struct browse_data *data;
+    data = browse_data_new(content_dir, container_id, starting_index);
+
+    gupnp_service_proxy_begin_action(content_dir, "Browse", browse_cb, data,
+                                     "ObjectID", G_TYPE_STRING, container_id,
+                                     "BrowseFlag", G_TYPE_STRING, 
+                                         "BrowseDirectChildren",
+                                     "Filter", G_TYPE_STRING, "*",
+                                     "StartingIndex", G_TYPE_UINT,
+                                         starting_index,
+                                     "RequestedCount", G_TYPE_UINT,
+                                         requested_count,
+                                     "SortCriteria", G_TYPE_STRING, "",
+                                     NULL);
+}
+
 void set_panarea_padding(GtkWidget *child, gpointer data)
 {
     void set_child_padding(GtkWidget *child, gpointer user_data)
