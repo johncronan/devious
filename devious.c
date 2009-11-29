@@ -21,13 +21,6 @@
  *
  */
 
-/*
-gcc -pthread -L/usr/X11R6/lib -lm
-`pkg-config --libs glib-2.0 gthread-2.0 hildon-1 gupnp-1.0 gupnp-av-1.0`
--O0 -g -Wall -I/usr/include -I/usr/X11R6/include
-`pkg-config --cflags glib-2.0 gconf-2.0 gthread-2.0 hildon-1 gupnp-1.0 gupnp-av-1.0`
--o devious devious.c
-*/
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,34 +31,7 @@ gcc -pthread -L/usr/X11R6/lib -lm
 #include <libgupnp/gupnp-control-point.h>
 #include <libgupnp-av/gupnp-av.h>
 
-#define APPLICATION_NAME "Devious"
-#define ROW_HEIGHT 75
-#define ICON_WIDTH 90
-#define ICON_XALIGN 0.6
-#define MEDIA_RENDERER "urn:schemas-upnp-org:device:MediaRenderer:*"
-#define MEDIA_SERVER "urn:schemas-upnp-org:device:MediaServer:*"
-
-struct proxy {
-    GtkTreeRowReference *row;
-    GUPnPDeviceProxy *proxy;
-    char *name;
-};
-
-struct proxy_set {
-    GHashTable *renderers;
-    GHashTable *servers;
-    GtkListStore *renderer_list;
-    GtkListStore *server_list;
-    GdkPixbuf *icon;
-};
-
-enum {
-    COL_ICON = 0,
-    COL_LABEL,
-    COL_ID,
-    NUM_COLS
-};
-
+#include "devious.h"
 
 void set_panarea_padding(GtkWidget *child, gpointer data)
 {
@@ -75,7 +41,7 @@ void set_panarea_padding(GtkWidget *child, gpointer data)
         gboolean expand, fill;
         guint pad;
         GtkPackType pack;
-        
+
         gtk_box_query_child_packing(box, child, &expand, &fill, &pad, &pack);
         gtk_box_set_child_packing(box, child, expand, fill, 0, pack);
     }
@@ -87,7 +53,7 @@ void set_panarea_padding(GtkWidget *child, gpointer data)
 GtkWidget *new_selector(GtkListStore *list)
 {
     GtkWidget *selector = hildon_touch_selector_new();
-    
+
     HildonTouchSelectorColumn *column =
         hildon_touch_selector_append_column(HILDON_TOUCH_SELECTOR(selector),
                                             GTK_TREE_MODEL(list), NULL, NULL);
@@ -131,10 +97,10 @@ GtkWidget *artists_window(struct proxy *server, char *artist)
     GtkListStore *list = gtk_list_store_new(NUM_COLS-1,
                                             GDK_TYPE_PIXBUF, G_TYPE_STRING);
     GtkWidget *selector = new_selector(list);
-    
+
 //    g_signal_connect(G_OBJECT(selector), "changed",
 //                     G_CALLBACK(view_select), server);
-    
+
     gtk_container_add(GTK_CONTAINER(window), selector);
 
     return window;
@@ -145,20 +111,20 @@ void view_select(HildonTouchSelector *selector, gint column, gpointer data)
     GtkTreePath *path;
     path = hildon_touch_selector_get_last_activated_row(selector, column);
     if (!path) return;
-    
+
     GtkTreeModel *model = hildon_touch_selector_get_model(selector, column);
     GtkTreeIter iter;
     gtk_tree_model_get_iter(model, &iter, path);
 
     char *label;
     gtk_tree_model_get(model, &iter, COL_LABEL, &label, -1);
-    
+
     struct proxy *server = (struct proxy *)data;
     GtkWidget *window = NULL;
     if (!strcmp(label, "Artists")) {
         window = artists_window(server, NULL);
     }
-    
+
     if (!window) return;
     HildonWindowStack *stack = hildon_window_stack_get_default();
     hildon_window_stack_push_1(stack, HILDON_STACKABLE_WINDOW(window));
@@ -188,10 +154,10 @@ GtkWidget *server_window(struct proxy *server)
                        COL_ICON, icon, COL_LABEL, "Artists", -1);
 
     GtkWidget *selector = new_selector(list);
-    
+
     g_signal_connect(G_OBJECT(selector), "changed",
                      G_CALLBACK(view_select), server);
-    
+
     gtk_container_add(GTK_CONTAINER(window), selector);
 
     return window;
@@ -202,32 +168,32 @@ void server_select(HildonTouchSelector *selector, gint column, gpointer data)
     GtkTreePath *path;
     path = hildon_touch_selector_get_last_activated_row(selector, column);
     if (!path) return;
-    
+
     GtkTreeModel *model = hildon_touch_selector_get_model(selector, column);
     GtkTreeIter iter;
     gtk_tree_model_get_iter(model, &iter, path);
 
     char *udn;
     gtk_tree_model_get(model, &iter, COL_ID, &udn, -1);
-    
+
     GHashTable *servers = (GHashTable *)data;
     struct proxy *server = g_hash_table_lookup(servers, udn);
 
     GtkWidget *window = server_window(server);
-    
+
     /* TODO: GList *child_devices = gupnp_device_info_list_devices(GUPNP_DEVICE_INFO(server->proxy)); */
 
     HildonWindowStack *stack = hildon_window_stack_get_default();
-    hildon_window_stack_push_1(stack, HILDON_STACKABLE_WINDOW(window));        
+    hildon_window_stack_push_1(stack, HILDON_STACKABLE_WINDOW(window));
 }
 
 GtkWidget *main_window(HildonProgram *program, struct proxy_set *proxy_set)
 {
     GtkWidget *window = hildon_stackable_window_new();
-    hildon_program_add_window(program, HILDON_WINDOW(window));    
+    hildon_program_add_window(program, HILDON_WINDOW(window));
 
     gtk_window_set_title(GTK_WINDOW(window), APPLICATION_NAME);
-    
+
     GError *error = NULL;
     proxy_set->icon = gtk_icon_theme_load_icon(gtk_icon_theme_get_default(),
                                                "control_bluetooth_lan",
@@ -235,12 +201,12 @@ GtkWidget *main_window(HildonProgram *program, struct proxy_set *proxy_set)
                                                0, &error);
     proxy_set->server_list = gtk_list_store_new(NUM_COLS, GDK_TYPE_PIXBUF,
                                                 G_TYPE_STRING, G_TYPE_STRING);
-    
+
     GtkWidget *selector = new_selector(proxy_set->server_list);
-    
+
     g_signal_connect(G_OBJECT(selector), "changed",
                      G_CALLBACK(server_select), proxy_set->servers);
-    
+
     gtk_container_add(GTK_CONTAINER(window), selector);
 
     return window;
@@ -270,7 +236,7 @@ void add_server(GUPnPDeviceProxy *proxy, struct proxy_set *proxy_set)
     GtkTreeModel *model = GTK_TREE_MODEL(proxy_set->server_list);
     GtkTreePath *path = gtk_tree_model_get_path(model, &iter);
     server->row = gtk_tree_row_reference_new(model, path);
-    
+
     g_hash_table_replace(proxy_set->servers, (char *)udn, server);
 }
 
@@ -279,7 +245,7 @@ void remove_server(GUPnPDeviceProxy *proxy, struct proxy_set *proxy_set)
     const char *udn = gupnp_device_info_get_udn(GUPNP_DEVICE_INFO(proxy));
     struct proxy *server = g_hash_table_lookup(proxy_set->servers, udn);
     if (!server) return;
-    
+
     GtkTreeModel *model = GTK_TREE_MODEL(proxy_set->server_list);
     GtkTreeIter iter;
     gtk_tree_model_get_iter(model, &iter,
@@ -320,32 +286,32 @@ void device_proxy_unavailable(GUPnPControlPoint *cp,
 GUPnPContext *init_upnp(struct proxy_set *proxy_set)
 {
     GError *error = NULL;
-    
+
     g_type_init();
-    
+
     GUPnPContext *context = gupnp_context_new(NULL, NULL, 0, &error);
     if (error) {
         g_printerr("Error creating the GUPnP context: %s\n", error->message);
         g_error_free(error);
         exit(1);
     }
-    
+
     GUPnPControlPoint *cp = gupnp_control_point_new(context, "ssdp:all");
-    
+
     g_signal_connect(cp, "device-proxy-available",
                      G_CALLBACK(device_proxy_available), proxy_set);
     g_signal_connect(cp, "device-proxy-unavailable",
                      G_CALLBACK(device_proxy_unavailable), proxy_set);
 
     gssdp_resource_browser_set_active(GSSDP_RESOURCE_BROWSER(cp), TRUE);
-    
+
     return context;
 }
 
 int main(int argc, char *argv[])
 {
     g_thread_init(NULL);
-    
+
     hildon_gtk_init(&argc, &argv);
 
     HildonProgram *program = hildon_program_get_instance();
@@ -358,7 +324,7 @@ int main(int argc, char *argv[])
     GtkWidget *window = main_window(program, &proxy_set);
     g_signal_connect(G_OBJECT(window), "destroy",
                      G_CALLBACK(gtk_main_quit), NULL);
-    
+
     GUPnPContext *context = init_upnp(&proxy_set);
 
     gtk_widget_show(window);
