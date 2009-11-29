@@ -253,8 +253,8 @@ void view_select(HildonTouchSelector *selector, gint column, gpointer data)
     GtkTreeIter iter;
     gtk_tree_model_get_iter(model, &iter, path);
 
-    char *label;
-    gtk_tree_model_get(model, &iter, COL_LABEL, &label, -1);
+    GUPnPServiceProxy *content;
+    gtk_tree_model_get(model, &iter, COL_ID, &content, -1);
 
     struct proxy *server = (struct proxy *)data;
     GtkWidget *window = NULL;
