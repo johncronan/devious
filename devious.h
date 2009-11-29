@@ -39,6 +39,7 @@ gcc -pthread -L/usr/X11R6/lib -lm
 #define MEDIA_RENDERER "urn:schemas-upnp-org:device:MediaRenderer:*"
 #define MEDIA_SERVER "urn:schemas-upnp-org:device:MediaServer:*"
 #define MAX_BROWSE 64
+#define CONTENT_DIR "urn:schemas-upnp-org:service:ContentDirectory"
 
 struct proxy {
     GtkTreeRowReference *row;
@@ -58,6 +59,7 @@ struct browse_data {
     GUPnPServiceProxy *content_dir;
     gchar *id;
     guint32 starting_index;
+    GtkListStore *list;
 };
 
 enum {
@@ -68,7 +70,8 @@ enum {
 };
 
 void browse(GUPnPServiceProxy *content_dir, const char *container_id,
-            guint32 starting_index, guint32 requested_count);
+            guint32 starting_index, guint32 requested_count,
+            GtkListStore *list);
 
 void set_panarea_padding(GtkWidget *child, gpointer data);
 
@@ -78,7 +81,7 @@ GtkWidget *artists_window(struct proxy *server, char *artist);
 
 void view_select(HildonTouchSelector *selector, gint column, gpointer data);
 
-GtkWidget *server_window(struct proxy *server);
+GtkWidget *server_window(struct proxy *server, GtkListStore **list);
 
 void server_select(HildonTouchSelector *selector, gint column, gpointer data);
 

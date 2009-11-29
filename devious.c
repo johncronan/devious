@@ -35,14 +35,27 @@
 
 GUPnPDIDLLiteParser *didl_parser;
 
-void on_didl_object_available(GUPnPDIDLLiteParser *didl_parser,
-                              xmlNode *object_node, gpointer user_data)
+void add_view(GUPnPDIDLLiteParser *didl_parser, xmlNode *object_node,
+              gpointer user_data)
 {
+    struct browse_data *data = (struct browse_data *)user_data;
+    
+    char *title = gupnp_didl_lite_object_get_title(object_node);
 
+    GError *error = NULL;
+    GdkPixbuf *icon = gtk_icon_theme_load_icon(gtk_icon_theme_get_default(),
+                                               "general_folder",
+                                               HILDON_ICON_PIXEL_SIZE_FINGER,
+                                               0, &error);
+    GtkTreeIter iter;
+    gtk_list_store_append(data->list, &iter);
+    gtk_list_store_set(data->list, &iter,
+                       COL_ICON, icon, COL_LABEL, title, -1);
 }
 
 struct browse_data *browse_data_new(GUPnPServiceProxy *content_dir,
-                                    const char *id, guint32 starting_index)
+                                    const char *id, guint32 starting_index,
+                                    GtkListStore *list)
 {
     struct browse_data *data;
 
@@ -50,6 +63,7 @@ struct browse_data *browse_data_new(GUPnPServiceProxy *content_dir,
     data->content_dir = g_object_ref(content_dir);
     data->id = g_strdup(id);
     data->starting_index = starting_index;
+    data->list = list;
 
     return data;
 }
@@ -85,8 +99,7 @@ void browse_cb(GUPnPServiceProxy *content_dir,
         GError *error = NULL;
 
         if (!gupnp_didl_lite_parser_parse_didl(didl_parser, didl_xml,
-                                               on_didl_object_available,
-                                               data, &error)) {
+                                               add_view, data, &error)) {
             g_warning("%s\n", error->message);
             g_error_free(error);
         }
@@ -98,7 +111,7 @@ void browse_cb(GUPnPServiceProxy *content_dir,
         remaining = total_matches - data->starting_index;
         /* Keep browsing till we get each and every object */
         if (remaining != 0) browse(content_dir, data->id, data->starting_index,
-                                   MIN(remaining, MAX_BROWSE));
+                                   MIN(remaining, MAX_BROWSE), data->list);
     } else if (error) {
         GUPnPServiceInfo *info;
 
@@ -114,10 +127,11 @@ void browse_cb(GUPnPServiceProxy *content_dir,
 }
 
 void browse(GUPnPServiceProxy *content_dir, const char *container_id,
-            guint32 starting_index, guint32 requested_count)
+            guint32 starting_index, guint32 requested_count,
+            GtkListStore *list)
 {
     struct browse_data *data;
-    data = browse_data_new(content_dir, container_id, starting_index);
+    data = browse_data_new(content_dir, container_id, starting_index, list);
 
     gupnp_service_proxy_begin_action(content_dir, "Browse", browse_cb, data,
                                      "ObjectID", G_TYPE_STRING, container_id,
@@ -130,6 +144,30 @@ void browse(GUPnPServiceProxy *content_dir, const char *container_id,
                                          requested_count,
                                      "SortCriteria", G_TYPE_STRING, "",
                                      NULL);
+}
+
+void update_container(GUPnPServiceProxy *content_dir,
+                      const char *container_id)
+{
+    GtkTreeModel *model;
+    GtkTreeIter container_iter;
+    
+printf("qux: %s\n", container_id);
+}
+
+void on_container_update_ids(GUPnPServiceProxy *content_dir,
+                             const char *variable, GValue *value,
+                             gpointer user_data)
+{
+    char **tokens;
+    guint  i;
+
+    tokens = g_strsplit(g_value_get_string(value), ",", 0);
+    for (i=0; tokens[i] != NULL && tokens[i+1] != NULL; i+=2) {
+        update_container(content_dir, tokens[i]);
+    }
+
+    g_strfreev (tokens);
 }
 
 void set_panarea_padding(GtkWidget *child, gpointer data)
@@ -229,28 +267,13 @@ void view_select(HildonTouchSelector *selector, gint column, gpointer data)
     hildon_window_stack_push_1(stack, HILDON_STACKABLE_WINDOW(window));
 }
 
-GtkWidget *server_window(struct proxy *server)
+GtkWidget *server_window(struct proxy *server, GtkListStore **view_list)
 {
     GtkWidget *window = hildon_stackable_window_new();
     gtk_window_set_title(GTK_WINDOW(window), server->name);
 
-    GError *error = NULL;
-    GdkPixbuf *icon = gtk_icon_theme_load_icon(gtk_icon_theme_get_default(),
-                                               "general_folder",
-                                               HILDON_ICON_PIXEL_SIZE_FINGER,
-                                               0, &error);
     GtkListStore *list = gtk_list_store_new(NUM_COLS-1,
                                             GDK_TYPE_PIXBUF, G_TYPE_STRING);
-    GtkTreeIter iter;
-    gtk_list_store_append(list, &iter);
-    gtk_list_store_set(list, &iter,
-                       COL_ICON, icon, COL_LABEL, "All tracks", -1);
-    gtk_list_store_append(list, &iter);
-    gtk_list_store_set(list, &iter,
-                       COL_ICON, icon, COL_LABEL, "Albums", -1);
-    gtk_list_store_append(list, &iter);
-    gtk_list_store_set(list, &iter,
-                       COL_ICON, icon, COL_LABEL, "Artists", -1);
 
     GtkWidget *selector = new_selector(list);
 
@@ -259,6 +282,7 @@ GtkWidget *server_window(struct proxy *server)
 
     gtk_container_add(GTK_CONTAINER(window), selector);
 
+    *view_list = list;
     return window;
 }
 
@@ -278,7 +302,18 @@ void server_select(HildonTouchSelector *selector, gint column, gpointer data)
     GHashTable *servers = (GHashTable *)data;
     struct proxy *server = g_hash_table_lookup(servers, udn);
 
-    GtkWidget *window = server_window(server);
+    GUPnPServiceProxy *content_dir = GUPNP_SERVICE_PROXY(
+        gupnp_device_info_get_service(GUPNP_DEVICE_INFO(server->proxy),
+                                      CONTENT_DIR));
+
+    GtkListStore *view_list;
+    GtkWidget *window = server_window(server, &view_list);
+
+    browse(content_dir, "0", 0, MAX_BROWSE, view_list);
+    gupnp_service_proxy_add_notify(content_dir, "ContainerUpdateIDs",
+                                   G_TYPE_STRING, on_container_update_ids,
+                                   NULL);
+    gupnp_service_proxy_set_subscribed(content_dir, TRUE);
 
     /* TODO: GList *child_devices = gupnp_device_info_list_devices(GUPNP_DEVICE_INFO(server->proxy)); */
 
@@ -319,14 +354,20 @@ void add_renderer(GUPnPDeviceProxy *proxy, struct proxy_set *proxy_set)
 void add_server(GUPnPDeviceProxy *proxy, struct proxy_set *proxy_set)
 {
     const char *udn = gupnp_device_info_get_udn(GUPNP_DEVICE_INFO(proxy));
+
     struct proxy *server = g_hash_table_lookup(proxy_set->servers, udn);
     if (server) return;
 
+    char *name = gupnp_device_info_get_friendly_name(GUPNP_DEVICE_INFO(proxy));
+    GUPnPServiceInfo *content_dir =
+        gupnp_device_info_get_service(GUPNP_DEVICE_INFO(proxy), CONTENT_DIR);
+    
+    if (!name || !content_dir) return;
+
     server = (struct proxy *)malloc(sizeof(struct proxy));
     server->proxy = proxy;
-    server->name =
-        gupnp_device_info_get_friendly_name(GUPNP_DEVICE_INFO(proxy));
-
+    server->name = name;
+    
     GtkTreeIter iter;
     gtk_list_store_append(proxy_set->server_list, &iter);
     gtk_list_store_set(proxy_set->server_list, &iter,
