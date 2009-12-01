@@ -25,19 +25,25 @@
 #define INCLUDED_DEVIOUS_H 1
 
 #define APPLICATION_NAME "Devious"
+#define PLAY_WINDOW_TITLE "Now playing"
+#define CHOOSE_TARGET "Choose target"
 #define ROW_HEIGHT 75
 #define ICON_WIDTH 90
 #define ICON_XALIGN 0.6
 #define MEDIA_RENDERER "urn:schemas-upnp-org:device:MediaRenderer:*"
 #define MEDIA_SERVER "urn:schemas-upnp-org:device:MediaServer:*"
-#define MAX_BROWSE 64
 #define CONTENT_DIR "urn:schemas-upnp-org:service:ContentDirectory"
+#define CONNECTION_MANAGER "urn:schemas-upnp-org:service:ConnectionManager"
+#define AV_TRANSPORT "urn:schemas-upnp-org:service:AVTransport"
+#define MAX_BROWSE 64
 
 struct proxy {
     GtkTreeRowReference *row;
     GUPnPDeviceProxy *proxy;
     char *name;
-    GUPnPDIDLLiteParser *didl_parser;
+    struct proxy_set *set;
+    char **protocols;
+    GtkTreeRowReference *current_selection;
 };
 
 struct proxy_set {
@@ -46,6 +52,8 @@ struct proxy_set {
     GtkListStore *renderer_list;
     GtkListStore *server_list;
     GdkPixbuf *icon;
+    HildonPickerButton *renderer_picker;
+    GUPnPDIDLLiteParser *didl_parser;
 };
 
 struct browse_data {
@@ -60,10 +68,11 @@ enum {
     COL_ICON = 0,
     COL_LABEL,
     COL_ID,
+    COL_CONTENT,
+    COL_CONTAINER,
     NUM_COLS
 };
 
-#define COL_CONTENT NUM_COLS
 
 void browse(GUPnPServiceProxy *content_dir, const char *container_id,
             guint32 starting_index, guint32 requested_count,
@@ -75,7 +84,8 @@ GtkWidget *new_selector(GtkListStore *list);
 
 void content_select(HildonTouchSelector *selector, gint column, gpointer data);
 
-GtkWidget *content_window(struct proxy *server, GtkListStore **list);
+GtkWidget *content_window(struct proxy *server, char *title,
+                          GtkListStore **list);
 
 void server_select(HildonTouchSelector *selector, gint column, gpointer data);
 
@@ -90,6 +100,6 @@ void remove_server(GUPnPDeviceProxy *proxy, struct proxy_set *proxy_set);
 void device_proxy_available(GUPnPControlPoint *cp,
                             GUPnPDeviceProxy *proxy, gpointer user_data);
 
-GUPnPContext *init_upnp(struct proxy_set *proxy_set);
+void init_upnp(struct proxy_set *proxy_set);
 
 #endif /* INCLUDED_DEVIOUS_H */
